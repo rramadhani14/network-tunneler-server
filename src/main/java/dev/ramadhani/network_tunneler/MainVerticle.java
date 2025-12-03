@@ -1,19 +1,18 @@
 package dev.ramadhani.network_tunneler;
 
-import io.vertx.core.DeploymentOptions;
+import dev.ramadhani.network_tunneler.transport.WebsocketNetworkTransport;
+import dev.ramadhani.network_tunneler.tunneler.HttpTunneler;
+import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.VerticleBase;
-import io.vertx.core.buffer.Buffer;
-import io.vertx.core.eventbus.EventBus;
-import io.vertx.core.http.ServerWebSocket;
-import io.vertx.ext.web.Router;
+import io.vertx.core.http.HttpServerRequest;
 
 public class MainVerticle extends VerticleBase {
 
   @Override
   public Future<?> start() {
-//    EventBus eb = vertx.eventBus();
-    vertx.deployVerticle("dev.ramadhani.network_tunneler.LocalTesterVerticle");
-    return vertx.deployVerticle("dev.ramadhani.network_tunneler.WsTunneler");
+    WebsocketNetworkTransport<HttpServerRequest> ws = new WebsocketNetworkTransport<>();
+    AbstractVerticle httpTunneler = new HttpTunneler(ws);
+    return vertx.deployVerticle(httpTunneler);
   }
 }

@@ -1,68 +1,70 @@
-package dev.ramadhani.network_tunneler;
+package dev.ramadhani.network_tunneler.transport;
 
 import com.github.benmanes.caffeine.cache.AsyncCache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import dev.ramadhani.network_tunneler.protocol.JsonRpcHelper;
+import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServer;
-import io.vertx.core.http.HttpServerRequest;
-import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.internal.logging.Logger;
 import io.vertx.core.internal.logging.LoggerFactory;
 import io.vertx.core.json.JsonObject;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-import java.nio.charset.Charset;
-import java.util.*;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 
-public class WsNetworkTransport implements NetworkTransport {
-  Logger logger = LoggerFactory.getLogger(WsNetworkTransport.class);
 
-  ServerWebSocket serverWebSocket;
-  AsyncCache<String, HttpServerRequest> serverRequestCaffeine;
-  Vertx vertx;
+@NoArgsConstructor
+@Getter
+@Setter
+public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
+  Logger logger = LoggerFactory.getLogger(WebsocketNetworkTransport.class);
 
-  public WsNetworkTransport(
-    HttpServer httpServer,
-    RemovalListener<String, HttpServerRequest> removalListener,
-    Vertx vertx
-  ) {
-    this.serverRequestCaffeine = Caffeine.newBuilder()
+  private ServerWebSocket serverWebSocket;
+  private AsyncCache<String, T> requests;
+  private Vertx vertx;
+  private BiConsumer<T, JsonObject> channelProcessSubscriberResponse;
+  private Function<T, Future<String>> requestSerializer;
+
+
+
+  @Override
+  public void registerTransport(HttpServer httpServer, Function<T, Future<String>> requestSerializer, BiConsumer<T, JsonObject> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener, Vertx vertx) {
+    httpServer.webSocketHandler(this::handleWebsocketConnection);
+    this.channelProcessSubscriberResponse = channelProcessSubscriberResponse;
+    this.requests = Caffeine.newBuilder()
       .evictionListener(removalListener)
       .expireAfterWrite(5, TimeUnit.MINUTES)
       .maximumSize(50)
       .buildAsync();
-    httpServer.webSocketHandler(this::handleWebsocketConnection);
+    this.requestSerializer = requestSerializer;
+    this.vertx = vertx;
   }
 
   @Override
-  public void handleIncomingHttpRequest(HttpServerRequest req) {
+  public void handleIncomingRequest(String type, T req) {
     if (this.serverWebSocket != null && !this.serverWebSocket.isClosed()) {
-      String id = UUID.randomUUID().toString();
-      this.serverWebSocket.write(
-        JsonObject.of(
-          "jsonrpc", "2.0",
-          "id", id,
-          "method", "http",
-          "params", List.of(req.headers().entries().stream().map(it -> it.getKey() + ": " + it.getValue()).collect(Collectors.joining("\n")), body.toString(Charset.defaultCharset())
-          )).toBuffer()
-      );
-      logger.info("Putting in cache id: " + id);
-      this.serverRequestCaffeine.put(id, CompletableFuture.completedFuture(req));
+      this.requestSerializer.apply(req).onSuccess(serializedRequest -> {
+        String id = UUID.randomUUID().toString();
+        JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload(id, type, serializedRequest);
+        this.serverWebSocket.write(jsonRpcPayload.toBuffer());
+        logger.info("Putting in cache id: " + id);
+        this.requests.put(id, CompletableFuture.completedFuture(req));
+      });
     } else {
       throw new RuntimeException("No subscription registered/subscription connection closed");
     }
   }
 
-
-  @Override
-  public void handleSubscriberResponse(Buffer buffer) {
-
-  }
 
   private void handleWebsocketConnection(ServerWebSocket serverWebSocket) {
     logger.info("Received subscription request");
@@ -97,7 +99,7 @@ public class WsNetworkTransport implements NetworkTransport {
       }
       String id = jsonRpcResponse.getString("id");
       logger.info("Response id: " + id);
-      CompletableFuture<HttpServerRequest> reqFuture = serverRequestCaffeine.getIfPresent(id);
+      CompletableFuture<T> reqFuture = requests.getIfPresent(id);
       logger.info("req future : " + reqFuture);
       if (reqFuture != null) {
         reqFuture.thenAccept(
@@ -109,19 +111,8 @@ public class WsNetworkTransport implements NetworkTransport {
                 payload = jsonRpcResponse.getJsonObject("error");
               }
               if (payload != null) {
-                Integer status = payload.getInteger("status");
-                String headers = payload.getString("headers");
-                String body = payload.getString("body");
-                Map<String, String> headersMap = new HashMap<>();
-                if(headers != null) {
-                  headersMap = Arrays.stream(headers.split("\n")).map(item -> item.split(": ")).collect(Collectors.toMap(it -> it[0], it -> it[1]));
-                }
-                logger.info("Sending response back to subscriber");
-                HttpServerResponse res = req.response();
-                res.setStatusCode(status);
-                res.headers().setAll(headersMap);
-                res.end(body);
-                serverRequestCaffeine
+                this.channelProcessSubscriberResponse.accept(req, payload);
+                requests
                   .synchronous()
                   .invalidate(id);
               }

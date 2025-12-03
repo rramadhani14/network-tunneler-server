@@ -1,6 +1,16 @@
-= Network-tunneler
+= Network-tunneler Server
 
 image:https://img.shields.io/badge/vert.x-5.0.5-purple.svg[link="https://vertx.io"]
+
+This is a tunneling software developed to learn vertx.
+Tunneling allow server to forward an incoming HTTP request to a subscribing client similiar to localtunnel and ngrok.
+Advantage of tunneling is for example allowing developer to forward request to a local webserver for developing or debugging software.
+
+== How this works
+This works by creating a persistent connection between tunneling-client and tunneling-server on subscription by using websocket.
+After subscription succeed, an incoming request to tunneling server will be forwarded to tunneling-client using JSON-RPC protocol.
+The tunneling server will wait for response from the tunneling client, and after processing request, the tunneling client will send the response to tunneling server.
+The tunneling server will then forward this response to the actual client making the HTTP request.
 
 This application was generated using http://start.vertx.io
 
