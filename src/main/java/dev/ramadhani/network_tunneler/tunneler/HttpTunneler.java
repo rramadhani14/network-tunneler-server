@@ -6,11 +6,12 @@ import io.vertx.core.Future;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
-import io.vertx.core.internal.logging.Logger;
-import io.vertx.core.internal.logging.LoggerFactory;
+
 import io.vertx.core.json.JsonObject;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -20,7 +21,7 @@ import java.util.stream.Collectors;
 @Getter
 public class HttpTunneler extends AbstractVerticle {
     public static final String TYPE = "http";
-    private final Logger logger = LoggerFactory.getLogger(HttpTunneler.class);
+    private static final Logger logger = LoggerFactory.getLogger(HttpTunneler.class);
     private final int port = 3000;
     private RequestDispatcher<HttpServer, HttpServerRequest> requestDispatcher;
     private HttpServer server;

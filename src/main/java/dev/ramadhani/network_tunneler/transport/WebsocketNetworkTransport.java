@@ -8,12 +8,12 @@ import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.ServerWebSocket;
-import io.vertx.core.internal.logging.Logger;
-import io.vertx.core.internal.logging.LoggerFactory;
 import io.vertx.core.json.JsonObject;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -25,7 +25,7 @@ import java.util.function.Function;
 @Getter
 @Setter
 public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
-    Logger logger = LoggerFactory.getLogger(WebsocketNetworkTransport.class);
+    private static final Logger logger = LoggerFactory.getLogger(WebsocketNetworkTransport.class);
 
     private ServerWebSocket serverWebSocket;
     private AsyncCache<String, T> requests;
@@ -72,7 +72,7 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
                 String id = UUID.randomUUID().toString();
                 JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload(id, type, serializedRequest);
                 this.serverWebSocket.write(jsonRpcPayload.toBuffer());
-                logger.info("Putting in cache id: " + id);
+                logger.info("Putting in cache id: {}", id);
                 this.requests.put(id, CompletableFuture.completedFuture(req));
             });
         } else {
@@ -89,9 +89,9 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
                 throw new IllegalArgumentException("Invalid version: " + version);
             }
             String id = jsonRpcResponse.getString("id");
-            logger.info("Response id: " + id);
+            logger.info("Response id: {}", id);
             CompletableFuture<T> reqFuture = requests.getIfPresent(id);
-            logger.info("req future : " + reqFuture);
+            logger.info("req future: {}", reqFuture);
             if (reqFuture != null) {
                 reqFuture.thenAccept(
                         req -> {
@@ -99,7 +99,9 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
                             try {
                                 JsonObject payload = jsonRpcResponse.getJsonObject("result");
                                 if (payload == null) {
-                                    payload = jsonRpcResponse.getJsonObject("error");
+                                    JsonObject error = jsonRpcResponse.getJsonObject("error");
+                                    logger.error("Error: {}", error);
+                                    payload = error.getJsonObject("data");
                                 }
                                 if (payload != null) {
                                     this.channelProcessSubscriberResponse.accept(req, payload);

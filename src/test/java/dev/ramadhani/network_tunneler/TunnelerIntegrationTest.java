@@ -4,26 +4,26 @@ package dev.ramadhani.network_tunneler;
 import dev.ramadhani.network_tunneler.dispatcher.WebsocketRequestDispatcher;
 import dev.ramadhani.network_tunneler.subscription_registry.WebsocketSubscriptionRegistry;
 import dev.ramadhani.network_tunneler.tunneler.HttpTunneler;
-import io.vertx.core.*;
+import io.vertx.core.AbstractVerticle;
+import io.vertx.core.Future;
+import io.vertx.core.Promise;
+import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.*;
-import io.vertx.core.internal.logging.Logger;
-import io.vertx.core.internal.logging.LoggerFactory;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.logging.SLF4JLogDelegateFactory;
 import io.vertx.junit5.Timeout;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,27 +46,28 @@ public class TunnelerIntegrationTest {
     @Test
     @Timeout(value = 30, timeUnit = TimeUnit.SECONDS)
     public void TunnelingSucceed(Vertx vertx, VertxTestContext testContext) throws InterruptedException {
+        // Arrange
         int clients = 200;
         int requestsPerClient = 500;
         HttpClient httpClient = vertx.createHttpClient();
         String testId = UUID.randomUUID().toString();
-        AtomicInteger counter = new AtomicInteger(0);
-        AtomicInteger errorCounter1 = new AtomicInteger(0);
-        AtomicInteger errorCounter2 = new AtomicInteger(0);
-        AtomicInteger errorCounter3 = new AtomicInteger(0);
-        AtomicInteger errorCounter4 = new AtomicInteger(0);
+        AtomicInteger succededRequests = new AtomicInteger(0);
+        AtomicInteger connectionFailed = new AtomicInteger(0);
+        AtomicInteger receiveConfigurationFailed = new AtomicInteger(0);
+        AtomicInteger testingTunnelerServerFailed = new AtomicInteger(0);
+        AtomicInteger otherErrors = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(clients * requestsPerClient);
+        // Act
         for (int i = 0; i < clients; i++) {
-            vertx.setTimer( ((long) (Math.random() * 10) + 1) * 1000, l -> {
-                    try {
+            vertx.setTimer(((long) (Math.random() * 10) + 1) * 1000, l -> {
+                try {
                     vertx.createWebSocketClient().connect(3000, "localhost", "/tunneler/ws")
                             .onFailure(throwable -> {
                                 logger.error("Failed -> " + throwable.getMessage(), throwable);
-                                errorCounter1.incrementAndGet();
-                                for(int j = 0; j < requestsPerClient; j++) {
+                                connectionFailed.incrementAndGet();
+                                for (int j = 0; j < requestsPerClient; j++) {
                                     latch.countDown();
                                 }
-//          testContext.failNow(throwable); // Coverage seems to be buggy and need to be retried
                             })
                             .onSuccess(webSocket -> {
                                 Promise<String> promise = Promise.promise();
@@ -87,7 +88,7 @@ public class TunnelerIntegrationTest {
                                     promise.future()
                                             .onFailure(throwable -> {
                                                 logger.error("Failed 2 -> " + throwable.getMessage(), throwable);
-                                                errorCounter2.incrementAndGet();
+                                                receiveConfigurationFailed.incrementAndGet();
                                                 latch.countDown();
                                             })
                                             .onSuccess(path -> {
@@ -96,37 +97,38 @@ public class TunnelerIntegrationTest {
                                                         .compose(HttpClientResponse::body)
                                                         .onFailure(throwable -> {
                                                             logger.error("Failed 3 -> " + throwable.getMessage(), throwable);
-                                                            errorCounter3.incrementAndGet();
+                                                            testingTunnelerServerFailed.incrementAndGet();
                                                             latch.countDown();
                                                         })
                                                         .onSuccess(it -> {
-                                                            counter.incrementAndGet();
+                                                            succededRequests.incrementAndGet();
                                                             latch.countDown();
                                                             assertEquals("success!" + testId, it.toString());
                                                         });
                                             });
                                 }
                             });
-            } catch (Exception e) {
-                        latch.countDown();
-                        logger.error("Failed -> " + e.getMessage(), e);
-                        errorCounter4.incrementAndGet();
-            }});
+                } catch (Exception e) {
+                    latch.countDown();
+                    logger.error("Failed -> " + e.getMessage(), e);
+                    otherErrors.incrementAndGet();
+                }
+            });
         }
-        vertx.setPeriodic(3000, l -> {
-            logger.info("Total requests: " + (clients * requestsPerClient));
-            logger.info("Wait for latch: " + latch);
-            logger.info("Succeed: " + counter.get());
-            logger.info("Failed1: " + errorCounter1.get());
-            logger.info("Failed2: " + errorCounter2.get());
-            logger.info("Failed3: " + errorCounter3.get());
-            logger.info("Failed4: " + errorCounter4.get());
-        });
         latch.await();
-        logger.info("Latch: " + latch);
-        assertEquals(clients * requestsPerClient, counter.get());
-        vertx.undeploy(deploymentId.result());
-        vertx.close();
+        // Assert
+        logger.info("Total possible requests: " + (clients * requestsPerClient));
+        logger.info("Wait for latch: " + latch);
+        logger.info("Succeed: " + succededRequests.get());
+        logger.info("Connection failed: " + connectionFailed.get());
+        logger.info("Configuration not received: " + receiveConfigurationFailed.get());
+        logger.info("Testing tunneler failed: " + testingTunnelerServerFailed.get());
+        logger.info("Other errors: " + otherErrors.get());
+        int clientErrorsPossibleRequests = connectionFailed.get() * requestsPerClient;
+        int totalPossibleRequests = (succededRequests.get() + testingTunnelerServerFailed.get() + clientErrorsPossibleRequests);
+        assertEquals(clients * requestsPerClient, totalPossibleRequests);
+        assertEquals(0, receiveConfigurationFailed.get());
+        assertEquals(0, otherErrors.get());
         testContext.completeNow();
     }
 }
