@@ -29,7 +29,7 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
 
     private ServerWebSocket serverWebSocket;
     private AsyncCache<String, T> requests;
-    private BiConsumer<T, JsonObject> channelProcessSubscriberResponse;
+    private BiConsumer<T, String> channelProcessSubscriberResponse;
     private Function<T, Future<String>> requestSerializer;
 
     public WebsocketNetworkTransport(ServerWebSocket serverWebSocket, Vertx vertx) {
@@ -45,7 +45,7 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
     }
 
     @Override
-    public void registerTransport(Function<T, Future<String>> requestSerializer, BiConsumer<T, JsonObject> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener) {
+    public void registerTransport(Function<T, Future<String>> requestSerializer, BiConsumer<T, String> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener) {
         this.channelProcessSubscriberResponse = channelProcessSubscriberResponse;
         this.requests = Caffeine.newBuilder()
                 .evictionListener(removalListener)
@@ -95,13 +95,13 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
             if (reqFuture != null) {
                 reqFuture.thenAccept(
                         req -> {
-                            logger.info("Request received: " + req.toString());
+                            logger.info("Request received: {}", req.toString());
                             try {
-                                JsonObject payload = jsonRpcResponse.getJsonObject("result");
+                                String payload = jsonRpcResponse.getString("result");
                                 if (payload == null) {
                                     JsonObject error = jsonRpcResponse.getJsonObject("error");
                                     logger.error("Error: {}", error);
-                                    payload = error.getJsonObject("data");
+                                    payload = error.getString("data");
                                 }
                                 if (payload != null) {
                                     this.channelProcessSubscriberResponse.accept(req, payload);

@@ -42,16 +42,15 @@ public class HttpTunneler extends AbstractVerticle {
 
     private void processIncomingHttpRequest(HttpServerRequest req) {
         logger.info("Received http request");
-        logger.info("Path: " + req.path().split("/")[0]);
-        this.requestDispatcher.dispatch(req.path().split("/")[0], TYPE, req);
+        logger.info("Path: " + req.path().split("/")[1]);
+        this.requestDispatcher.dispatch(req.path().split("/")[1], TYPE, req);
     }
 
 
 
-    private void dispatcherResponseHandler(HttpServerRequest req, JsonObject payload) {
-        String response = payload.getString("response");
+    private void dispatcherResponseHandler(HttpServerRequest req, String payload) {
         // Get status from start line
-        List<String> lines = response.lines().toList();
+        List<String> lines = payload.lines().toList();
         String startLine = lines.get(0);
         int status = Integer.parseInt(startLine.split(" ")[1]);
 
@@ -63,7 +62,7 @@ public class HttpTunneler extends AbstractVerticle {
         String body = String.join("", lines.subList(headerSeparator + 1, lines.size()));
         Map<String, String> headersMap = headers.stream().map(item -> item.split(":")).collect(Collectors.toMap(it -> it[0].trim(), it -> it[1].trim()));
 
-        logger.info("Sending response back to subscriber");
+        logger.info("Sending response back to actual client");
         HttpServerResponse res = req.response();
         res.setStatusCode(status);
         res.headers().setAll(headersMap);
@@ -82,11 +81,12 @@ public class HttpTunneler extends AbstractVerticle {
         return req.body()
                 .map(buffer -> {
                     String methodName = req.method().name();
-                    String path = req.path();
+                    int slashIndex = req.path().indexOf("/", 1);
+                    String path = slashIndex == -1 ? "/" : req.path().substring(slashIndex);
                     String httpVersion = req.version().alpnName().toUpperCase();
                     String headers = req.headers().entries().stream().map(entry -> entry.getKey() + ": " + entry.getValue()).collect(Collectors.joining("\n"));
                     String body = buffer.toString();
-                    return methodName + " " + path + " " + httpVersion + "\n" + headers + "\n\n" + body;
+                    return methodName + " " + path + " " + httpVersion + "\n" + headers + "\n\n" + body + "\r\n";
                 });
     }
 }

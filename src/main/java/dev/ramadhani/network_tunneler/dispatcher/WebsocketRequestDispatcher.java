@@ -26,7 +26,7 @@ public class WebsocketRequestDispatcher<T> implements RequestDispatcher<HttpServ
     private String SUBSCRIPTION_PATH = "/tunneler/ws";
     private HttpServer httpServer;
     private Function<T, Future<String>> requestSerializer;
-    private BiConsumer<T, JsonObject> responseHandler;
+    private BiConsumer<T, String> responseHandler;
     private RemovalListener<String, T> removalListener;
 
     public WebsocketRequestDispatcher(WebsocketSubscriptionRegistry<T> registry, Vertx vertx) {
@@ -35,7 +35,7 @@ public class WebsocketRequestDispatcher<T> implements RequestDispatcher<HttpServ
     }
 
     @Override
-    public void registerHandlers(HttpServer server, Function<T, Future<String>> requestSerializer, BiConsumer<T, JsonObject> responseHandler, RemovalListener<String, T> removalListener) {
+    public void registerHandlers(HttpServer server, Function<T, Future<String>> requestSerializer, BiConsumer<T, String> responseHandler, RemovalListener<String, T> removalListener) {
         this.httpServer = server;
         this.requestSerializer = requestSerializer;
         this.responseHandler = responseHandler;

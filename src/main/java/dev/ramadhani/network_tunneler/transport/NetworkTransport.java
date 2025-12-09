@@ -2,7 +2,6 @@ package dev.ramadhani.network_tunneler.transport;
 
 import com.github.benmanes.caffeine.cache.RemovalListener;
 import io.vertx.core.Future;
-import io.vertx.core.json.JsonObject;
 
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -36,5 +35,5 @@ public interface NetworkTransport<T> {
      * @param channelProcessSubscriberResponse Method to be called to inform tunneler that a client has returned a response for a tunneling request
      * @param removalListener                  Method to be called in if tunneling request is expired
      */
-    void registerTransport(Function<T, Future<String>> requestSerializer, BiConsumer<T, JsonObject> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener);
+    void registerTransport(Function<T, Future<String>> requestSerializer, BiConsumer<T, String> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener);
 }

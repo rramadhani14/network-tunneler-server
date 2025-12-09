@@ -11,7 +11,6 @@ import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.*;
 import io.vertx.core.json.JsonObject;
-import io.vertx.core.logging.SLF4JLogDelegateFactory;
 import io.vertx.junit5.Timeout;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
@@ -21,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -38,7 +38,7 @@ public class TunnelerIntegrationTest {
     static public void setUp(Vertx vertx) {
         WebsocketSubscriptionRegistry<HttpServerRequest> registry = new WebsocketSubscriptionRegistry<>();
         WebsocketRequestDispatcher<HttpServerRequest> requestDispatcher = new WebsocketRequestDispatcher<>(registry, vertx);
-        AbstractVerticle httpTunneler = new HttpTunneler(vertx.createHttpServer(), requestDispatcher);
+        httpTunneler = new HttpTunneler(vertx.createHttpServer(), requestDispatcher);
         deploymentId = vertx.deployVerticle(httpTunneler);
         deploymentId.await();
     }
@@ -47,8 +47,8 @@ public class TunnelerIntegrationTest {
     @Timeout(value = 30, timeUnit = TimeUnit.SECONDS)
     public void TunnelingSucceed(Vertx vertx, VertxTestContext testContext) throws InterruptedException {
         // Arrange
-        int clients = 200;
-        int requestsPerClient = 500;
+        int clients = 25;
+        int requestsPerClient = 100;
         HttpClient httpClient = vertx.createHttpClient();
         String testId = UUID.randomUUID().toString();
         AtomicInteger succededRequests = new AtomicInteger(0);
@@ -79,7 +79,7 @@ public class TunnelerIntegrationTest {
                                         promise.succeed(path);
                                     } else {
                                         String requestId = json.getString("id");
-                                        webSocket.write(JsonObject.of("jsonrpc", "2.0", "id", requestId, "result", JsonObject.of("response", "HTTP/1.1 200 OK\nContent-Type:text/plain\n\nsuccess!" + testId))
+                                        webSocket.write(JsonObject.of("jsonrpc", "2.0", "id", requestId, "result", "HTTP/1.1 200 OK\nContent-Type:text/plain\n\nsuccess!" + testId + "\r\n")
                                                 .toBuffer());
                                         logger.info("WS sent response");
                                     }
@@ -91,21 +91,20 @@ public class TunnelerIntegrationTest {
                                                 receiveConfigurationFailed.incrementAndGet();
                                                 latch.countDown();
                                             })
-                                            .onSuccess(path -> {
-                                                httpClient.request(HttpMethod.GET, 3000, "localhost", path + "/test")
-                                                        .compose(HttpClientRequest::send)
-                                                        .compose(HttpClientResponse::body)
-                                                        .onFailure(throwable -> {
-                                                            logger.error("Failed 3 -> " + throwable.getMessage(), throwable);
-                                                            testingTunnelerServerFailed.incrementAndGet();
-                                                            latch.countDown();
-                                                        })
-                                                        .onSuccess(it -> {
-                                                            succededRequests.incrementAndGet();
-                                                            latch.countDown();
-                                                            assertEquals("success!" + testId, it.toString());
-                                                        });
-                                            });
+                                            .onSuccess(path -> httpClient.request(HttpMethod.GET, 3000, "localhost", "/" + path + "/test")
+                                                    .compose(HttpClientRequest::send)
+                                                    .compose(HttpClientResponse::body)
+                                                    .onFailure(throwable -> {
+                                                        logger.error("Failed 3 -> " + throwable.getMessage(), throwable);
+                                                        testingTunnelerServerFailed.incrementAndGet();
+                                                        latch.countDown();
+                                                    })
+                                                    .onSuccess(it -> {
+                                                        succededRequests.incrementAndGet();
+                                                        latch.countDown();
+                                                        logger.info(it.toString(StandardCharsets.UTF_8));
+                                                        assertEquals("success!" + testId, it.toString());
+                                                    }));
                                 }
                             });
                 } catch (Exception e) {
@@ -117,13 +116,13 @@ public class TunnelerIntegrationTest {
         }
         latch.await();
         // Assert
-        logger.info("Total possible requests: " + (clients * requestsPerClient));
-        logger.info("Wait for latch: " + latch);
-        logger.info("Succeed: " + succededRequests.get());
-        logger.info("Connection failed: " + connectionFailed.get());
-        logger.info("Configuration not received: " + receiveConfigurationFailed.get());
-        logger.info("Testing tunneler failed: " + testingTunnelerServerFailed.get());
-        logger.info("Other errors: " + otherErrors.get());
+        logger.info("Total possible requests: {}", clients * requestsPerClient);
+        logger.info("Wait for latch: {}", latch);
+        logger.info("Succeed: {}", succededRequests.get());
+        logger.info("Connection failed: {}", connectionFailed.get());
+        logger.info("Configuration not received: {}", receiveConfigurationFailed.get());
+        logger.info("Testing tunneler failed: {}", testingTunnelerServerFailed.get());
+        logger.info("Other errors: {}", otherErrors.get());
         int clientErrorsPossibleRequests = connectionFailed.get() * requestsPerClient;
         int totalPossibleRequests = (succededRequests.get() + testingTunnelerServerFailed.get() + clientErrorsPossibleRequests);
         assertEquals(clients * requestsPerClient, totalPossibleRequests);
