@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 public class HttpTunneler extends AbstractVerticle {
     public static final String TYPE = "http";
     private static final Logger logger = LoggerFactory.getLogger(HttpTunneler.class);
-    private final int port = 3000;
+    private int port = -1;
     private RequestDispatcher<HttpServer, HttpServerRequest> requestDispatcher;
     private HttpServer server;
 
@@ -33,11 +33,12 @@ public class HttpTunneler extends AbstractVerticle {
 
     @Override
     public void start() {
+        port = config().getInteger("server.port", 3000);
         server = vertx.createHttpServer();
         this.requestDispatcher.registerHandlers(server, this::requestSerializer, this::dispatcherResponseHandler, this::removalListener);
         server
                 .requestHandler(this::processIncomingHttpRequest)
-                .listen(port).onSuccess(http -> System.out.println("HTTP server started on port " + port));
+                .listen(port).onSuccess(http -> logger.info("HTTP server started on port {}", port));
     }
 
     private void processIncomingHttpRequest(HttpServerRequest req) {
