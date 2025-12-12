@@ -43,7 +43,7 @@ public class HttpTunneler extends AbstractVerticle {
 
     private void processIncomingHttpRequest(HttpServerRequest req) {
         logger.info("Received http request");
-        logger.info("Path: " + req.path().split("/")[1]);
+        logger.info("Path: {}", req.path().split("/")[1]);
         this.requestDispatcher.dispatch(req.path().split("/")[1], TYPE, req);
     }
 

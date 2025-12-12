@@ -18,15 +18,16 @@ import org.slf4j.LoggerFactory;
 
 public class MainVerticle extends VerticleBase {
     private static final Logger logger = LoggerFactory.getLogger(MainVerticle.class);
+
     @Override
     public Future<?> start() {
         ConfigRetriever retriever = ConfigRetriever.create(vertx, new ConfigRetrieverOptions()
-            .addStore(new ConfigStoreOptions().setType("env"))
             .addStore(new ConfigStoreOptions()
                 .setType("file")
                 .setFormat("properties")
                 .setConfig(new JsonObject()
-                    .put("path", "application.properties"))));
+                    .put("path", "application.properties")))
+            .addStore(new ConfigStoreOptions().setType("env")));
         return retriever.getConfig()
             .onSuccess(config -> {
                 WebsocketSubscriptionRegistry<HttpServerRequest> registry = new WebsocketSubscriptionRegistry<>();
@@ -34,7 +35,7 @@ public class MainVerticle extends VerticleBase {
                 DeploymentOptions deploymentOptions = new DeploymentOptions().setConfig(config);
                 AbstractVerticle httpTunneler = new HttpTunneler(vertx.createHttpServer(), requestDispatcher);
                 vertx.deployVerticle(httpTunneler, deploymentOptions);
-        });
+            });
 
     }
 }
