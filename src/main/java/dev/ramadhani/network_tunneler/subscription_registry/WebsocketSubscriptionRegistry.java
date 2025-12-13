@@ -5,11 +5,9 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalListener;
 import dev.ramadhani.network_tunneler.helper.TriFunction;
 import dev.ramadhani.network_tunneler.transport.WebsocketNetworkTransport;
-import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.streams.WriteStream;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 @RequiredArgsConstructor
 public class WebsocketSubscriptionRegistry<T> implements SubscriptionRegistry<ServerWebSocket, T> {
