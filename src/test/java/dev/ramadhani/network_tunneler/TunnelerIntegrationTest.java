@@ -6,12 +6,12 @@ import dev.ramadhani.network_tunneler.subscription_registry.WebsocketSubscriptio
 import dev.ramadhani.network_tunneler.tunneler.HttpTunneler;
 import io.vertx.core.*;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.file.OpenOptions;
 import io.vertx.core.http.*;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.multipart.MultipartForm;
-import io.vertx.ext.web.multipart.impl.MultipartFormImpl;
 import io.vertx.junit5.Timeout;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
@@ -23,13 +23,11 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -152,11 +150,12 @@ public class TunnelerIntegrationTest {
         AtomicInteger testingTunnelerServerFailed = new AtomicInteger(0);
         AtomicInteger otherErrors = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(clients * requestsPerClient);
-        Buffer content = generateRandomBytesBuffer(200000);
+        Buffer content = vertx.fileSystem().readFileBlocking("test.txt");
         String contentString = content.toString(StandardCharsets.UTF_8);
 
         // Act
         for (int i = 0; i < clients; i++) {
+            int finalI = i;
             vertx.setTimer(((long) (Math.random() * 10) + 5) * 1000, l -> {
                 try {
                     WebSocketClientOptions webSocketClientOptions = new WebSocketClientOptions()
@@ -199,13 +198,18 @@ public class TunnelerIntegrationTest {
                                         Buffer collectedPayload = payloadCollectors.get(requestId);
                                         logger.info("Sent payload: {}", content.toString().length());
                                         String collectedPayloadsString = collectedPayload.toString();
-                                        Pattern p = Pattern.compile("boundary=([^;\\n]+)");
-                                        Matcher m = p.matcher(collectedPayloadsString);
-                                        m.find();
-                                        String boundary = m.group(1);
-                                        List<String> body = Arrays.stream(collectedPayloadsString.split(boundary)).collect(Collectors.toList());
+                                        Pattern boundaryPattern = Pattern.compile("boundary=([^;\\n]+)");
+                                        Matcher boundaryMatcher = boundaryPattern.matcher(collectedPayloadsString);
+                                        boundaryMatcher.find();
+                                        String boundary = boundaryMatcher.group(1);
+                                        List<String> body = Arrays.stream(collectedPayloadsString.split("--" + boundary)).toList();
                                         String filePart = body.stream().filter(it -> it.contains("filename")).findFirst().get();
-                                        String fileBytes = filePart.trim().split("\n\n")[1].trim();
+                                        String fileBytes = filePart.trim().split("\r\n\r\n")[1].trim();
+                                        Pattern filenamePattern = Pattern.compile("filename=([^;\\n]+)");
+                                        Matcher filenameMatcher = filenamePattern.matcher(filePart);
+                                        filenameMatcher.find();
+                                        String filename = filenameMatcher.group(1).trim().replace("\"", "");
+                                        vertx.fileSystem().openBlocking("src/test/resources/res/" + filename, new OpenOptions().setCreate(true).setWrite(true).setTruncateExisting(true)).write(Buffer.buffer(fileBytes));
 //                                        assertEquals(contentString, fileBytes);
                                         logger.info("Counted packets: {}", packetCounter.get());
                                         logger.info("Sent packets: {}", params.getString(2));
@@ -225,7 +229,7 @@ public class TunnelerIntegrationTest {
                             for (int j = 0; j < requestsPerClient; j++) {
                                 MultipartForm form = MultipartForm.create()
                                     .attribute("test", "test-payload")
-                                    .textFileUpload("test-" + j, "test-" + j + ".txt", content, "text/plain");
+                                    .textFileUpload("test-" + j, "test-" + finalI + "-" + j + ".txt", content, "text/plain");
                                 promise.future()
                                     .onFailure(throwable -> {
                                         logger.error("Failed 2 -> " + throwable.getMessage(), throwable);
@@ -289,6 +293,12 @@ public class TunnelerIntegrationTest {
         logger.info("Configuration not received: {}", receiveConfigurationFailed.get());
         logger.info("Testing tunneler failed: {}", testingTunnelerServerFailed.get());
         logger.info("Other errors: {}", otherErrors.get());
+        List<String> uploadResults = vertx.fileSystem()
+            .readDirBlocking("src/test/resources/res");
+        uploadResults.forEach(uploadResult -> {
+           Buffer res = vertx.fileSystem().readFileBlocking(uploadResult);
+           assertEquals(content, res);
+        });
         int clientErrorsPossibleRequests = connectionFailed.get() * requestsPerClient;
         int totalPossibleRequests = (succededRequests.get() + testingTunnelerServerFailed.get() + clientErrorsPossibleRequests);
         assertEquals(clients * requestsPerClient, totalPossibleRequests);
