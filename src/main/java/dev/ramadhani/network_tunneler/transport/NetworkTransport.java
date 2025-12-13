@@ -1,7 +1,13 @@
 package dev.ramadhani.network_tunneler.transport;
 
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import dev.ramadhani.network_tunneler.helper.TriConsumer;
+import dev.ramadhani.network_tunneler.helper.TriFunction;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.core.streams.WriteStream;
 
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -31,9 +37,9 @@ public interface NetworkTransport<T> {
     /**
      * Method to initialize network transport. Used to register the methods for processing tunneling request
      *
-     * @param requestSerializer                Method called to serialize tunneling request, need to be compatible with client
+     * @param streamingRequestSerializer                Method called to serialize tunneling request, need to be compatible with client
      * @param channelProcessSubscriberResponse Method to be called to inform tunneler that a client has returned a response for a tunneling request
      * @param removalListener                  Method to be called in if tunneling request is expired
      */
-    void registerTransport(Function<T, Future<String>> requestSerializer, BiConsumer<T, String> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener);
+    void registerTransport(TriFunction<T, WriteStream<Buffer>, Handler<Void>, Runnable> streamingRequestSerializer, BiConsumer<T, String> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener);
 }

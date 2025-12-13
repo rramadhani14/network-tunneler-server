@@ -3,11 +3,14 @@ package dev.ramadhani.network_tunneler.tunneler;
 import dev.ramadhani.network_tunneler.dispatcher.RequestDispatcher;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.streams.WriteStream;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.slf4j.Logger;
@@ -15,6 +18,8 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @NoArgsConstructor
@@ -35,7 +40,7 @@ public class HttpTunneler extends AbstractVerticle {
     public void start() {
         port = config().getInteger("server.port", 3000);
         server = vertx.createHttpServer();
-        this.requestDispatcher.registerHandlers(server, this::requestSerializer, this::dispatcherResponseHandler, this::removalListener);
+        this.requestDispatcher.registerHandlers(server, this::streamingRequestSerializer, this::dispatcherResponseHandler, this::removalListener);
         server
                 .requestHandler(this::processIncomingHttpRequest)
                 .listen(port).onSuccess(http -> logger.info("HTTP server started on port {}", port));
@@ -77,17 +82,44 @@ public class HttpTunneler extends AbstractVerticle {
                     .end(JsonObject.of("message", "Request evicted").toBuffer());
         }
     }
+
     // Not really needed, but would be nice for implementing client if format is the same
-    private Future<String> requestSerializer(HttpServerRequest req) {
-        return req.body()
-                .map(buffer -> {
-                    String methodName = req.method().name();
-                    int slashIndex = req.path().indexOf("/", 1);
-                    String path = slashIndex == -1 ? "/" : req.path().substring(slashIndex);
-                    String httpVersion = req.version().alpnName().toUpperCase();
-                    String headers = req.headers().entries().stream().map(entry -> entry.getKey() + ": " + entry.getValue()).collect(Collectors.joining("\n"));
-                    String body = buffer.toString();
-                    return methodName + " " + path + " " + httpVersion + "\n" + headers + "\n\n" + body + "\r\n";
-                });
+//    private Future<String> requestSerializer(HttpServerRequest req) {
+//        return req.body()
+//                .map(buffer -> {
+//                    String methodName = req.method().name();
+//                    int slashIndex = req.path().indexOf("/", 1);
+//                    String path = slashIndex == -1 ? "/" : req.path().substring(slashIndex);
+//                    String httpVersion = req.version().alpnName().toUpperCase();
+//                    String headers = req.headers().entries().stream().map(entry -> entry.getKey() + ": " + entry.getValue()).collect(Collectors.joining("\n"));
+//                    String body = buffer.toString();
+//                    return methodName + " " + path + " " + httpVersion + "\n" + headers + "\n\n" + body + "\r\n";
+//                });
+//    }
+
+    private Runnable streamingRequestSerializer(HttpServerRequest req, WriteStream<Buffer> s, Handler<Void> endHandler) {
+        return () -> {
+
+            String methodName = req.method().name();
+            int slashIndex = req.path().indexOf("/", 1);
+            String path = slashIndex == -1 ? "/" : req.path().substring(slashIndex);
+            String httpVersion = req.version().alpnName().toUpperCase();
+            String headers = req.headers().entries().stream().map(entry -> entry.getKey() + ": " + entry.getValue()).collect(Collectors.joining("\n"));
+            s.write(Buffer.buffer(methodName + " " + path + " " + httpVersion + "\n" + headers + "\n\n"));
+            req.handler(buffer -> {
+                if (s.writeQueueFull()) {
+                    req.pause();
+                    s.drainHandler(v -> req.resume());
+                } else {
+                    s.write(buffer);
+                }
+            });
+            req.endHandler((v) -> {
+                s.write(Buffer.buffer("\r\n"));
+                endHandler.handle(null);
+                s.end();
+            });
+
+        };
     }
 }

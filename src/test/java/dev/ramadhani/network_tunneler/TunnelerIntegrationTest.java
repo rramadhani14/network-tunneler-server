@@ -4,15 +4,11 @@ package dev.ramadhani.network_tunneler;
 import dev.ramadhani.network_tunneler.dispatcher.WebsocketRequestDispatcher;
 import dev.ramadhani.network_tunneler.subscription_registry.WebsocketSubscriptionRegistry;
 import dev.ramadhani.network_tunneler.tunneler.HttpTunneler;
-import io.vertx.core.AbstractVerticle;
-import io.vertx.core.Future;
-import io.vertx.core.Promise;
-import io.vertx.core.Vertx;
+import io.vertx.core.*;
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.file.impl.AsyncFileImpl;
 import io.vertx.core.http.*;
 import io.vertx.core.json.JsonObject;
-import io.vertx.core.streams.ReadStream;
+import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.multipart.MultipartForm;
 import io.vertx.junit5.Timeout;
 import io.vertx.junit5.VertxExtension;
@@ -43,7 +39,7 @@ public class TunnelerIntegrationTest {
         WebsocketSubscriptionRegistry<HttpServerRequest> registry = new WebsocketSubscriptionRegistry<>();
         WebsocketRequestDispatcher<HttpServerRequest> requestDispatcher = new WebsocketRequestDispatcher<>(registry, vertx);
         httpTunneler = new HttpTunneler(vertx.createHttpServer(), requestDispatcher);
-        deploymentId = vertx.deployVerticle(httpTunneler);
+        deploymentId = vertx.deployVerticle(httpTunneler, new DeploymentOptions());
         deploymentId.await();
     }
 
@@ -137,11 +133,12 @@ public class TunnelerIntegrationTest {
 
     @Test
     @Timeout(value = 30, timeUnit = TimeUnit.SECONDS)
-    public void TunnelingHttpMultipartOverWebsocketSucceed(Vertx vertx, VertxTestContext testContext) throws Exception {
+    public void TunnelingHttpMultipartOverWebsocketSucceed(Vertx vertx, VertxTestContext testContext) throws InterruptedException {
         // Arrange
-        int clients = 25;
+        int clients = 50;
         int requestsPerClient = 100;
         HttpClient httpClient = vertx.createHttpClient();
+        WebClient webClient = WebClient.wrap(httpClient);
         String testId = UUID.randomUUID().toString();
         AtomicInteger succededRequests = new AtomicInteger(0);
         AtomicInteger connectionFailed = new AtomicInteger(0);
@@ -151,9 +148,11 @@ public class TunnelerIntegrationTest {
         CountDownLatch latch = new CountDownLatch(clients * requestsPerClient);
         // Act
         for (int i = 0; i < clients; i++) {
-            vertx.setTimer(((long) (Math.random() * 10) + 1) * 1000, l -> {
+            vertx.setTimer(((long) (Math.random() * 10) + 5) * 1000, l -> {
                 try {
-                    vertx.createWebSocketClient().connect(3000, "localhost", "/tunneler/ws")
+                    WebSocketClientOptions webSocketClientOptions = new WebSocketClientOptions()
+                        .setMaxMessageSize(1024 * 1024 * 512);
+                    vertx.createWebSocketClient(webSocketClientOptions).connect(3000, "localhost", "/tunneler/ws")
                         .onFailure(throwable -> {
                             logger.error("Failed -> " + throwable.getMessage(), throwable);
                             connectionFailed.incrementAndGet();
@@ -163,13 +162,15 @@ public class TunnelerIntegrationTest {
                         })
                         .onSuccess(webSocket -> {
                             Promise<String> promise = Promise.promise();
-                            webSocket.handler(buffer -> {
-                                logger.info("WS handler received: " + buffer);
+                            webSocket.binaryMessageHandler(buffer -> {
+                                logger.info("WS handler received");
                                 JsonObject json = buffer.toJsonObject();
                                 if (json.getString("method").equals("config")) {
+                                    logger.info("Received config");
                                     String path = Buffer.buffer(json.getJsonArray("params").getString(0)).toJsonObject().getString("path");
                                     promise.succeed(path);
                                 } else {
+                                    logger.info("Received http");
                                     String requestId = json.getString("id");
                                     webSocket.write(JsonObject.of("jsonrpc", "2.0", "id", requestId, "result", "HTTP/1.1 200 OK\nContent-Type:text/plain\n\nsuccess!" + testId + "\r\n")
                                         .toBuffer());
@@ -177,31 +178,46 @@ public class TunnelerIntegrationTest {
                                 }
                             });
                             for (int j = 0; j < requestsPerClient; j++) {
-                                String content = generateRandomString(5000000);
+                                Buffer content = generateRandomBytesBuffer(500000);
                                 MultipartForm form = MultipartForm.create()
                                         .attribute("test", "test-payload")
                                             .binaryFileUpload("test-" + j, "test-" + j + ".txt", content, "text/plain");
-//                                httpClient.request(new RequestOptions().)
                                 promise.future()
                                     .onFailure(throwable -> {
                                         logger.error("Failed 2 -> " + throwable.getMessage(), throwable);
                                         receiveConfigurationFailed.incrementAndGet();
                                         latch.countDown();
                                     })
-                                    .onSuccess(path -> httpClient.request(HttpMethod.POST, 3000, "localhost", "/" + path + "/test")
-                                        .compose(req -> req.send(content))
-                                        .compose(HttpClientResponse::body)
-                                        .onFailure(throwable -> {
-                                            logger.error("Failed 3 -> " + throwable.getMessage(), throwable);
-                                            testingTunnelerServerFailed.incrementAndGet();
-                                            latch.countDown();
-                                        })
-                                        .onSuccess(it -> {
-                                            succededRequests.incrementAndGet();
-                                            latch.countDown();
-                                            logger.info(it.toString(StandardCharsets.UTF_8));
-                                            assertEquals("success!" + testId, it.toString());
-                                        }));
+                                    .onSuccess(path -> {
+                                        webClient.post(3000, "localhost", "/" + path + "/test")
+                                            .sendMultipartForm(form)
+//                                            .sendBuffer(Buffer.buffer("test"))
+                                            .onFailure(throwable -> {
+                                                logger.error("Failed 3 -> {}", throwable.getMessage(), throwable);
+                                                testingTunnelerServerFailed.incrementAndGet();
+                                                latch.countDown();
+                                            })
+                                            .onSuccess(response -> {
+                                                succededRequests.incrementAndGet();
+                                                latch.countDown();
+                                                logger.info(response.toString());
+                                                assertEquals("success!" + testId, response.body().toString());
+                                            });
+                                    });
+//                                    .onSuccess(path -> httpClient.request(HttpMethod.POST, 3000, "localhost", "/" + path + "/test")
+//                                        .compose(req -> req.send(Buffer.buffer("test")))
+//                                        .compose(HttpClientResponse::body)
+//                                        .onFailure(throwable -> {
+//                                            logger.error("Failed 3 -> {}", throwable.getMessage(), throwable);
+//                                            testingTunnelerServerFailed.incrementAndGet();
+//                                            latch.countDown();
+//                                        })
+//                                        .onSuccess(it -> {
+//                                            succededRequests.incrementAndGet();
+//                                            latch.countDown();
+//                                            logger.info(it.toString(StandardCharsets.UTF_8));
+//                                            assertEquals("success!" + testId, it.toString());
+//                                        }));
                             }
                         });
                 } catch (Exception e) {
@@ -228,10 +244,66 @@ public class TunnelerIntegrationTest {
         testContext.completeNow();
     }
 
-    public String generateRandomString(int length) {
+//    class RandomReadStream implements ReadStream<Buffer> {
+//        private int length;
+//        private int currentPosition = 0;
+//        private Vertx vertx;
+//        private Handler<Buffer> handler;
+//        private Handler<Void> endHandler;
+//
+//        private InboundBuffer<Buffer> queue;
+//        RandomReadStream(int length, Vertx vertx) {
+//            this.length = length;
+//            this.queue = new InboundBuffer<>(vertx.getOrCreateContext());
+//        }
+//
+//        @Override
+//        public ReadStream<Buffer> exceptionHandler(@Nullable Handler<Throwable> handler) {
+//            queue.exceptionHandler(handler);
+//            return this;
+//        }
+//
+//        @Override
+//        public ReadStream<Buffer> handler(@Nullable Handler<Buffer> handler) {
+//            queue.handler(buffer -> {
+//                if(buffer.length() > 0) {
+//                    handler.handle(buffer);
+//                } else {
+//                    endHandler()
+//                }
+//            });
+//            return this;
+//        }
+//
+//        @Override
+//        public ReadStream<Buffer> pause() {
+//            queue.pause();
+//            return this;
+//        }
+//
+//        @Override
+//        public ReadStream<Buffer> resume() {
+//            queue.resume();
+//            return this;
+//        }
+//
+//        @Override
+//        public ReadStream<Buffer> fetch(long amount) {
+//            queue.fetch(amount);
+//            return this;
+//        }
+//
+//        @Override
+//        public ReadStream<Buffer> endHandler(@Nullable Handler<Void> endHandler) {
+//            this.endHandler = endHandler;
+//            return this;
+//        }
+//    }
+
+    public Buffer generateRandomBytesBuffer(int length) {
         Random random = new Random();
         byte[] bytes = new byte[length];
         random.nextBytes(bytes);
-        return new String(bytes, StandardCharsets.UTF_8);
+        return Buffer.buffer(bytes);
     }
 }

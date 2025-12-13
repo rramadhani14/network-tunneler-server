@@ -3,12 +3,17 @@ package dev.ramadhani.network_tunneler.transport;
 import com.github.benmanes.caffeine.cache.AsyncCache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import dev.ramadhani.network_tunneler.helper.TriConsumer;
+import dev.ramadhani.network_tunneler.helper.TriFunction;
 import dev.ramadhani.network_tunneler.protocol.JsonRpcHelper;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.streams.WriteStream;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -30,7 +35,8 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
     private ServerWebSocket serverWebSocket;
     private AsyncCache<String, T> requests;
     private BiConsumer<T, String> channelProcessSubscriberResponse;
-    private Function<T, Future<String>> requestSerializer;
+    private TriFunction<T, WriteStream<Buffer>, Handler<Void>, Runnable> streamingRequestSerializer;
+
 
     public WebsocketNetworkTransport(ServerWebSocket serverWebSocket, Vertx vertx) {
         super();
@@ -45,14 +51,14 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
     }
 
     @Override
-    public void registerTransport(Function<T, Future<String>> requestSerializer, BiConsumer<T, String> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener) {
+    public void registerTransport(TriFunction<T, WriteStream<Buffer>, Handler<Void>, Runnable> streamingRequestSerializer, BiConsumer<T, String> channelProcessSubscriberResponse, RemovalListener<String, T> removalListener) {
         this.channelProcessSubscriberResponse = channelProcessSubscriberResponse;
         this.requests = Caffeine.newBuilder()
                 .evictionListener(removalListener)
                 .expireAfterWrite(5, TimeUnit.MINUTES)
                 .maximumSize(500)
                 .buildAsync();
-        this.requestSerializer = requestSerializer;
+        this.streamingRequestSerializer = streamingRequestSerializer;
     }
 
     @Override
@@ -68,10 +74,14 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
     @Override
     public void handleIncomingRequest(String type, T req) {
         if (this.serverWebSocket != null && !this.serverWebSocket.isClosed()) {
+            this.streamingRequestSerializer.apply(req, this.serverWebSocket, endHandler -> {
+                logger.info("Request forwarded");
+            });
+
             this.requestSerializer.apply(req).onSuccess(serializedRequest -> {
                 String id = UUID.randomUUID().toString();
                 JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload(id, type, serializedRequest);
-                this.serverWebSocket.write(jsonRpcPayload.toBuffer());
+                this.serverWebSocket.writeBinaryMessage(jsonRpcPayload.toBuffer());
                 logger.info("Putting in cache id: {}", id);
                 this.requests.put(id, CompletableFuture.completedFuture(req));
             });

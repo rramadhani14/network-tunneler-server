@@ -3,10 +3,15 @@ package dev.ramadhani.network_tunneler.subscription_registry;
 import com.github.benmanes.caffeine.cache.AsyncCache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import dev.ramadhani.network_tunneler.helper.TriFunction;
 import dev.ramadhani.network_tunneler.transport.WebsocketNetworkTransport;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.ServerWebSocket;
+import io.vertx.core.streams.WriteStream;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,9 +31,9 @@ public class WebsocketSubscriptionRegistry<T> implements SubscriptionRegistry<Se
                 .buildAsync();
 
     @Override
-    public WebsocketNetworkTransport<T> register(String id, ServerWebSocket subscriptionRequest, Function<T, Future<String>> requestSerializer, BiConsumer<T, String> responseHandler, RemovalListener<String, T> removalListener, Vertx vertx) {
+    public WebsocketNetworkTransport<T> register(String id, ServerWebSocket subscriptionRequest, TriFunction<T, WriteStream<Buffer>, Handler<Void>, Runnable> streamingRequestSerializer, BiConsumer<T, String> responseHandler, RemovalListener<String, T> removalListener, Vertx vertx) {
         WebsocketNetworkTransport<T> networkTransport = new WebsocketNetworkTransport<>(subscriptionRequest, vertx);
-        networkTransport.registerTransport(requestSerializer, responseHandler, removalListener);
+        networkTransport.registerTransport(streamingRequestSerializer, responseHandler, removalListener);
         registry.put(id, CompletableFuture.completedFuture(networkTransport));
         return networkTransport;
     }
