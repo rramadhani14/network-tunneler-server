@@ -2,7 +2,6 @@ package dev.ramadhani.network_tunneler.tunneler;
 
 import dev.ramadhani.network_tunneler.dispatcher.RequestDispatcher;
 import io.vertx.core.AbstractVerticle;
-import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServer;
@@ -18,8 +17,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiConsumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @NoArgsConstructor
@@ -99,7 +96,6 @@ public class HttpTunneler extends AbstractVerticle {
 
     private Runnable streamingRequestSerializer(HttpServerRequest req, WriteStream<Buffer> s, Handler<Void> endHandler) {
         return () -> {
-
             String methodName = req.method().name();
             int slashIndex = req.path().indexOf("/", 1);
             String path = slashIndex == -1 ? "/" : req.path().substring(slashIndex);
@@ -116,7 +112,9 @@ public class HttpTunneler extends AbstractVerticle {
             });
             req.endHandler((v) -> {
                 s.write(Buffer.buffer("\r\n"));
-                endHandler.handle(null);
+                if(endHandler != null) {
+                    endHandler.handle(null);
+                }
                 s.end();
             });
 

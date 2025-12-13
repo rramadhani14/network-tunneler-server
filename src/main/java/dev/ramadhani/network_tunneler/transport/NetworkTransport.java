@@ -1,16 +1,12 @@
 package dev.ramadhani.network_tunneler.transport;
 
 import com.github.benmanes.caffeine.cache.RemovalListener;
-import dev.ramadhani.network_tunneler.helper.TriConsumer;
 import dev.ramadhani.network_tunneler.helper.TriFunction;
-import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.streams.WriteStream;
 
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 /**
  * Interface that contains needed methods for a class to be able to be used as network transport.
