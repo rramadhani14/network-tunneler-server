@@ -1,13 +1,18 @@
 package dev.ramadhani.network_tunneler.dispatcher;
 
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import dev.ramadhani.network_tunneler.helper.TriFunction;
 import dev.ramadhani.network_tunneler.subscription_registry.WebsocketSubscriptionRegistry;
 import dev.ramadhani.network_tunneler.transport.NetworkTransport;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServer;
+import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.streams.WriteStream;
 import lombok.Getter;
 import lombok.Setter;
 import org.slf4j.Logger;
@@ -25,7 +30,7 @@ public class WebsocketRequestDispatcher<T> implements RequestDispatcher<HttpServ
     @Setter
     private String SUBSCRIPTION_PATH = "/tunneler/ws";
     private HttpServer httpServer;
-    private Function<T, Future<String>> requestSerializer;
+    private TriFunction<T, WriteStream<Buffer>, Handler<Void>, Runnable> streamingRequestSerializer;
     private BiConsumer<T, String> responseHandler;
     private RemovalListener<String, T> removalListener;
 
@@ -35,13 +40,15 @@ public class WebsocketRequestDispatcher<T> implements RequestDispatcher<HttpServ
     }
 
     @Override
-    public void registerHandlers(HttpServer server, Function<T, Future<String>> requestSerializer, BiConsumer<T, String> responseHandler, RemovalListener<String, T> removalListener) {
+    public void registerHandlers(HttpServer server, TriFunction<T, WriteStream<Buffer>, Handler<Void>, Runnable> streamingRequestSerializer, BiConsumer<T, String> responseHandler, RemovalListener<String, T> removalListener) {
         this.httpServer = server;
-        this.requestSerializer = requestSerializer;
+        this.streamingRequestSerializer = streamingRequestSerializer;
         this.responseHandler = responseHandler;
         this.removalListener = removalListener;
         httpServer.webSocketHandler(this::handleWebsocketConnection);
     }
+
+
 
     @Override
     public void dispatch(String id, String type, T request) {
@@ -57,7 +64,7 @@ public class WebsocketRequestDispatcher<T> implements RequestDispatcher<HttpServ
         logger.info("Received subscription request");
         if (serverWebSocket.path().equals(SUBSCRIPTION_PATH)) {
             String id = UUID.randomUUID().toString();
-            NetworkTransport<T> networkTransport = registry.register(id, serverWebSocket, requestSerializer, responseHandler, removalListener, vertx);
+            NetworkTransport<T> networkTransport = registry.register(id, serverWebSocket, streamingRequestSerializer, responseHandler, removalListener, vertx);
             networkTransport.handleDispatcherConfiguration("config", JsonObject.of("path", id).toString());
         }
     }
