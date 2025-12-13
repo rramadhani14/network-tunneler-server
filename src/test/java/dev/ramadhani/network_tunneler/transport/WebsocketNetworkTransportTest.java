@@ -54,7 +54,7 @@ class WebsocketNetworkTransportTest {
       // Assert
       ArgumentCaptor<String> requestIdCaptor = ArgumentCaptor.forClass(String.class);
       verify(mockAsyncCache, times(1)).put(requestIdCaptor.capture(), any());
-      verify(mockServerWebSocket, times(1)).writeBinaryMessage(JsonRpcHelper.createTunnelerJsonRpcPayload(requestIdCaptor.getValue(), testRequestType, testSerializedRequest, "end").toBuffer());
+      verify(mockServerWebSocket, times(1)).writeBinaryMessage(JsonRpcHelper.createTunnelerJsonRpcPayload(requestIdCaptor.getValue(), testRequestType, testSerializedRequest, "end", 1).toBuffer());
       testContext.completeNow();
     }
   }

@@ -9,11 +9,12 @@ import java.util.List;
 public class JsonRpcHelper {
 
 
-    public static JsonObject createTunnelerJsonRpcPayload(String id, String type, String payload, String end) {
-        List<String> params = new ArrayList<>(1);
+    public static JsonObject createTunnelerJsonRpcPayload(String id, String type, String payload, String end, Integer count) {
+        List<String> params = new ArrayList<>(2);
         params.add(payload);
-        if(end != null) {
+        if(end != null && count != null) {
             params.add(end);
+            params.add(count.toString());
         }
         return JsonObject.of(
                 "jsonrpc", "2.0",

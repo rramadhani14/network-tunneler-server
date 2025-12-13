@@ -9,17 +9,24 @@ import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.streams.WriteStream;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @RequiredArgsConstructor
 public class ReqWebsocketPiper implements WriteStream<Buffer> {
+    private final static Logger logger = LoggerFactory.getLogger(ReqWebsocketPiper.class);
     private final String id;
     private final ServerWebSocket serverWebSocket;
     private final String type;
     private final Handler<Void> endHandler;
-
-    ArrayDeque<Buffer> buffers = new ArrayDeque<>(5);
+    private final AtomicInteger offset = new AtomicInteger(0);
+    private final AtomicInteger writes = new AtomicInteger(0);
+    private final ArrayDeque<Buffer> buffers = new ArrayDeque<>(8);
 
     @Override
     public WriteStream<Buffer> exceptionHandler(@Nullable Handler<Throwable> handler) {
@@ -36,9 +43,12 @@ public class ReqWebsocketPiper implements WriteStream<Buffer> {
             for (int i = 0; i < 4; i++) {
                 buffer.appendBuffer(buffers.poll());
             }
-            buffers.pop().appendBuffer(data);
-            JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload(id, type, buffer.toString(), null);
+            buffer.appendBuffer(data);
+            offset.getAndUpdate(i -> i + buffer.length());
+            logger.info("Buffer size {}", buffer.length());
+            JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload(id, type, buffer.toString(StandardCharsets.UTF_8), null, null);
             serverWebSocket.writeBinaryMessage(jsonRpcPayload.toBuffer());
+            writes.incrementAndGet();
         }
 
         return Future.succeededFuture();
@@ -50,8 +60,10 @@ public class ReqWebsocketPiper implements WriteStream<Buffer> {
         while (!buffers.isEmpty()) {
             buffer.appendBuffer(buffers.poll());
         }
-        JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload(id, type, buffer.toString(), "end");
+        offset.getAndUpdate(i -> i + buffer.length());
+        JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload(id, type, buffer.toString(StandardCharsets.UTF_8), "end", writes.incrementAndGet());
         serverWebSocket.writeBinaryMessage(jsonRpcPayload.toBuffer());
+        logger.info("Pipe transferred {}", offset.get());
         if(endHandler != null) {
             endHandler.handle(null);
         }

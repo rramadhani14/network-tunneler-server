@@ -60,7 +60,7 @@ public class WebsocketNetworkTransport<T> implements NetworkTransport<T> {
     @Override
     public void handleDispatcherConfiguration(String type, String serializedConfig) {
         if (this.serverWebSocket != null && !this.serverWebSocket.isClosed()) {
-                JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload("0", type, serializedConfig, null);
+                JsonObject jsonRpcPayload = JsonRpcHelper.createTunnelerJsonRpcPayload("0", type, serializedConfig, null, null);
                 this.serverWebSocket.write(jsonRpcPayload.toBuffer());
         } else {
             throw new RuntimeException("Subscription connection closed already");
